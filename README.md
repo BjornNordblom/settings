@@ -2,12 +2,12 @@
 Setting files
 
 # windows
-##Cmd
+## Cmd
 HKEY_CURRENT_USER -> Environment -> PROMPT (REG_SZ) = CMD$S[$D $T$H$H$H]$S$M$_$P$G
 
 Or system settings environment variable PROMPT.
 
-##PS1
+## PS1
 notepad $profile
 
 Add:
