@@ -1,16 +1,17 @@
 
+Set-Item -Path Env:OpenApiKey -Value sk-XXXXXXXXXXXX
+
 function Get-FromGpt3 {
     param(
         [Parameter(Mandatory = $False)]
         [String]$Question = "",
         [Parameter(Mandatory = $false)]
         [String]$Session = "",
-        [Parameter(Mandatory = $false)]
-        [ValidateScript({ $Session -ne "" })]
+        [string[]]$ListSession,
         [switch]$ListSessions,
-        [Parameter(Mandatory = $false)]
         [switch]$DeleteSessions,
-        [Parameter(Mandatory = $false)]
+        [string[]]$DeleteSession,
+        [switch]$ExpandOnLast,
         [switch]$Tips,
         [decimal]$Temperature=0.7,
         [string]$Model="text-davinci-003",
@@ -35,58 +36,99 @@ function Get-FromGpt3 {
         return
     }
 
-    Write-Debug "Session: `'$Session`' - Question: `'$Question`' - List: `'$ListSessions`' - Delete: `'$DeleteSessions`'"
+    if ($Session -eq "")
+    {
+        $Session = "Last"
+    }
 
-    $Sessions = [System.Management.Automation.OrderedHashtable]((Get-Item -Path "Env:OpenApiSessions" -ErrorAction SilentlyContinue).Value | ConvertFrom-Json -AsHashtable -NoEnumerate -ErrorAction SilentlyContinue)
+    Write-Debug "Session: `'$Session`' - Question: `'$Question`' - ListSessions: `'$ListSessions`' - ListSession: `'$ListSession`' - DeleteSessions: `'$DeleteSessions`' - DeleteSession: `'$DeleteSession`'"
+
+    $Sessions = ((Get-Item -Path "Env:OpenApiSessions" -ErrorAction SilentlyContinue).Value | ConvertFrom-Json -AsHashtable -NoEnumerate -ErrorAction SilentlyContinue)
+
     if ($Sessions -eq $null)
     {
-        $Sessions = [System.Management.Automation.OrderedHashtable]@{}
-    }    
+        $Sessions = [ordered]@{}
+    } 
     if ($ListSessions)
+    {
+        if ($Sessions.Keys.Count -eq 0)
+        {
+            Write-Host "No sessions."
+            return
+        }
+        $ListSession = $Sessions.Keys
+    }
+    if ($ListSession)
     {
         foreach ($k in $Sessions.Keys)
         {
-            Write-Host "Listing contents of: $k" -ForegroundColor Cyan
-            Write-Host $Sessions[$k].Prompts -ForegroundColor DarkCyan
+            Write-Host "Listing contents of: $k" -ForegroundColor DarkCyan
+            Write-Host $Sessions[$k].Prompt -ForegroundColor Cyan
         }
         return
     }
     if ($DeleteSessions)
     {
-        Remove-Item -Path "Env:OpenApiSessions" -ErrorAction SilentlyContinue
+        if ($Sessions.Keys.Count -eq 0)
+        {
+            Write-Host "No sessions."
+            return            
+        }        
+        $DeleteSession = $Sessions.Keys
+    }
+    if ($DeleteSession)
+    {
+        foreach ($k in $DeleteSession)
+        {
+            if ($Sessions.Keys -contains $k)
+            {
+                Write-Warning "Deleting session $k"
+                $Sessions.Remove($k)
+            }
+        }
+        Set-Item -Path "Env:OpenApiSessions" -Value ($Sessions | ConvertTo-Json)  
         return
     }
-    # Create or update if we have a question
-    if (($Session -ne "") -and ($Question -ne ""))
+    if ($Question -eq "")
     {
-        if ($Sessions.ContainsKey($Session) -and $Sessions[$Session].ContainsKey("Prompts") -and $Sessions[$Session].ContainsKey("Updated") -and ($Question -ne ""))
+        throw "No question provided."
+    }
+
+    # Read previous value, unless session Last and not ExpandOnLast
+    if ($Sessions.Keys -contains $Session)
+    {
+        if (($Session -eq "Last") -and (-not $ExpandOnLast))
         {
-            $Sessions[$Session]["Prompts"] += $Question
-            $Sessions[$Session]["Updated"] = (Get-Date).ToString("yyyy-MM-dd")
+            # Do nothing, this will overwrite session Last with current Question
         } else {
-            $Sessions[$Session] = @{ "Prompts"=[string[]]($Question);"Updated"=(Get-Date).ToString("yyyy-MM-dd") }
+            $Question = $Sessions[$Session]["Prompt"] + "`n`n" + $Question 
         }
-    }
+    } 
 
-    # Read from session that contains whole context, or just use the question
-    if ($Session -ne "")
-    {
-        $prompt = $Sessions[$Session]["Prompts"] -join "`n"
-    } else {
-        $prompt = $Question
-    }
-    $body = [ordered]@{ "model"=$Model; "temperature"=$Temperature; "stop"="\n"; "prompt"=$prompt; "max_tokens"=$MaxTokens }
-    Write-Host "Asking:" -ForegroundColor Green
-    Write-Host ($prompt | ConvertTo-Json) -ForegroundColor DarkGreen
+    $body = [ordered]@{ "model"=$Model; "temperature"=$Temperature; "stop"="\n"; "prompt"=$Question; "max_tokens"=$MaxTokens }
+    Write-Host "Asking:" -ForegroundColor DarkGreen
+    Write-Host ($Question | ConvertTo-Json) -ForegroundColor Green
     $response = Invoke-RestMethod -Headers @{Authorization=("Basic {0}" -f $openApiBase64AuthInfo)} -Uri "https://api.openai.com/v1/completions" -Method Post -Body ($body | ConvertTo-Json) -ContentType "application/json"
-    Write-Host "Response:" -ForegroundColor Blue
-    Write-Host ($response | ConvertTo-Json) -ForegroundColor DarkBlue
-
-    # Append to our Sessions
-    if (($Session -ne "") -and ($Question -ne "") -and ($response.choices[0].text -ne ""))
+    Write-Host "Response:" -ForegroundColor DarkGreen
+    if ($response.choices[0].text.Trim() -ne "")
     {
-        $Sessions[$Session]["Prompts"] += ($response.choices[0].text).Trim() + "`n`n"
+        $Answer = $response.choices[0].text.Trim()
+        Write-Host $Answer -ForegroundColor Blue
+    } else {
+        Write-Error "Unkown response:"
+        Write-Error ($response | ConvertTo-Json) 
+        return
+    }
+
+    if ($Answer -ne "")
+    {
+        $Sessions[$Session] = @{ "Prompt"=($Question + "`n`n" + $Answer) }
         Set-Item -Path "Env:OpenApiSessions" -Value ($Sessions | ConvertTo-Json)  
     }
-    Write-Debug $Sessions[$Session]
+
+    Write-Debug "All sessions:"
+    Write-Debug ($Sessions | ConvertTo-Json) 
+
+    Write-Debug "Current session:"
+    Write-Debug ($Sessions[$Session] | ConvertTo-Json)
 }
