@@ -1,4 +1,13 @@
 
+Import-Module PSColor
+
+$languageList = Get-WinUserLanguageList
+if (-not ($languageList | ? { $_.LanguageTag -eq "sv-SE" }))
+{
+    $languageList.Add("sv-SE")
+    Set-WinUserLanguageList -LanguageList $languageList
+}
+
 Set-Item -Path Env:OpenApiKey -Value sk-XXXXXXXXXXXX
 
 function Get-FromGpt3 {
