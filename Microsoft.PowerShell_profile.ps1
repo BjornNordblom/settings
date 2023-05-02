@@ -1,12 +1,9 @@
-
+oh-my-posh init pwsh --config "$env:POSH_THEMES_PATH/lambdageneration.omp.json" | Invoke-Expression
 Import-Module PSColor
 
 $languageList = Get-WinUserLanguageList
-if (-not ($languageList | ? { $_.LanguageTag -eq "sv-SE" }))
-{
-    $languageList.Add("sv-SE")
-    Set-WinUserLanguageList -LanguageList $languageList
-}
+$languageList.Add("sv-SE")
+Set-WinUserLanguageList -LanguageList $languageList -Force -ErrorAction Continue
 
 Set-Item -Path Env:OpenApiKey -Value sk-XXXXXXXXXXXX
 
